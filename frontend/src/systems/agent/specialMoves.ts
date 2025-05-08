@@ -10,8 +10,9 @@ export interface SpecialMoveDetails extends SpecialMove {
   basePower: number;
   accuracy: number;
   cooldown: number;
+  requirements: Partial<Stats>;
   description: string;
-  effect: string;
+  effect?: string;
 }
 
 // Define special moves with their requirements and effects
@@ -172,17 +173,17 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
   "Berserker Rage": {
     name: "Berserker Rage",
     type: "Physical",
-    target: "Self",
-    basePower: 0,
-    accuracy: 100,
-    cooldown: 4,
+    target: "Enemy",
+    basePower: 50,
+    accuracy: 90,
+    cooldown: 3,
     requirements: {
       strength: 20,
       vitality: 15,
     },
     description:
-      "Enter a rage state, increasing attack power but decreasing defense",
-    effect: "Increases attack by 50% for 3 turns, decreases defense by 25%",
+      "A powerful physical attack that increases in power as health decreases",
+    effect: "Damage increases by 50% when below 50% HP",
   },
   "Crushing Blow": {
     name: "Crushing Blow",
@@ -204,15 +205,15 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Arcane Burst",
     type: "Magical",
     target: "Enemy",
-    basePower: 90,
+    basePower: 45,
     accuracy: 95,
-    cooldown: 4,
+    cooldown: 2,
     requirements: {
       intelligence: 20,
       magic: 15,
     },
-    description: "Release a powerful burst of arcane energy",
-    effect: "30% chance to apply a magic damage over time effect",
+    description: "A burst of magical energy that ignores part of enemy defense",
+    effect: "Ignores 30% of enemy magical defense",
   },
   "Mystic Barrier": {
     name: "Mystic Barrier",
@@ -234,15 +235,15 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Shadow Strike",
     type: "Physical",
     target: "Enemy",
-    basePower: 75,
-    accuracy: 95,
-    cooldown: 3,
+    basePower: 40,
+    accuracy: 100,
+    cooldown: 2,
     requirements: {
       agility: 20,
       stealth: 15,
     },
-    description: "Strike from the shadows with increased critical hit chance",
-    effect: "50% increased critical hit chance, ignores 30% of enemy defense",
+    description: "A quick strike from the shadows with high accuracy",
+    effect: "Cannot be dodged",
   },
   "Smoke Bomb": {
     name: "Smoke Bomb",
@@ -267,13 +268,13 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     target: "Self",
     basePower: 0,
     accuracy: 100,
-    cooldown: 5,
+    cooldown: 4,
     requirements: {
       vitality: 20,
-      charisma: 15,
+      defense: 15,
     },
-    description: "Summon a divine shield that protects from damage",
-    effect: "Reduces all incoming damage by 50% for 3 turns",
+    description: "Creates a protective barrier that absorbs damage",
+    effect: "Reduces incoming damage by 50% for 2 turns",
   },
   "Holy Strike": {
     name: "Holy Strike",
