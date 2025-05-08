@@ -22,7 +22,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Tornado Spin",
     type: "Physical",
     target: "Enemy",
-    basePower: 75,
+    basePower: 25,
     accuracy: 90,
     cooldown: 3,
     requirements: {
@@ -36,7 +36,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Lightning Dash",
     type: "Physical",
     target: "Enemy",
-    basePower: 70,
+    basePower: 20,
     accuracy: 95,
     cooldown: 2,
     requirements: {
@@ -67,7 +67,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Thunder Strike",
     type: "Magical",
     target: "Enemy",
-    basePower: 85,
+    basePower: 30,
     accuracy: 85,
     cooldown: 3,
     requirements: {
@@ -81,7 +81,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Flame Vortex",
     type: "Magical",
     target: "Enemy",
-    basePower: 80,
+    basePower: 25,
     accuracy: 90,
     cooldown: 4,
     requirements: {
@@ -111,7 +111,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Ground Pound",
     type: "Physical",
     target: "Enemy",
-    basePower: 90,
+    basePower: 35,
     accuracy: 85,
     cooldown: 4,
     requirements: {
@@ -127,7 +127,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Dragon Cyclone",
     type: "Ultimate",
     target: "Enemy",
-    basePower: 120,
+    basePower: 45,
     accuracy: 85,
     cooldown: 6,
     requirements: {
@@ -142,7 +142,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Shadow Assassin",
     type: "Ultimate",
     target: "Enemy",
-    basePower: 110,
+    basePower: 40,
     accuracy: 90,
     cooldown: 5,
     requirements: {
@@ -157,7 +157,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Elemental Storm",
     type: "Ultimate",
     target: "Enemy",
-    basePower: 130,
+    basePower: 50,
     accuracy: 80,
     cooldown: 6,
     requirements: {
@@ -174,7 +174,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Berserker Rage",
     type: "Physical",
     target: "Enemy",
-    basePower: 50,
+    basePower: 15,
     accuracy: 90,
     cooldown: 3,
     requirements: {
@@ -189,7 +189,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Crushing Blow",
     type: "Physical",
     target: "Enemy",
-    basePower: 85,
+    basePower: 30,
     accuracy: 90,
     cooldown: 3,
     requirements: {
@@ -205,7 +205,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Arcane Burst",
     type: "Magical",
     target: "Enemy",
-    basePower: 45,
+    basePower: 15,
     accuracy: 95,
     cooldown: 2,
     requirements: {
@@ -235,7 +235,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Shadow Strike",
     type: "Physical",
     target: "Enemy",
-    basePower: 40,
+    basePower: 15,
     accuracy: 100,
     cooldown: 2,
     requirements: {
@@ -280,7 +280,7 @@ export const SPECIAL_MOVES: Record<string, SpecialMoveDetails> = {
     name: "Holy Strike",
     type: "Physical",
     target: "Enemy",
-    basePower: 80,
+    basePower: 25,
     accuracy: 100,
     cooldown: 3,
     requirements: {
@@ -300,24 +300,26 @@ export function calculateMoveDamage(
 ): number {
   let baseDamage = move.basePower;
 
-  // Apply stat modifiers based on move type
+  // Apply stat modifiers based on move type with reduced multipliers
   switch (move.type) {
     case "Physical":
       baseDamage *=
-        (attackerStats.strength / 100) * (1 - defenderStats.defense! / 200);
+        (attackerStats.strength / 400) * (1 - defenderStats.defense! / 800);
       break;
     case "Magical":
       baseDamage *=
-        (attackerStats.magic! / 100) * (1 - defenderStats.intelligence / 200);
+        (attackerStats.magic! / 400) * (1 - defenderStats.intelligence / 800);
       break;
     case "Ultimate":
-      baseDamage *= (attackerStats.strength + attackerStats.magic!) / 150;
+      baseDamage *= (attackerStats.strength + attackerStats.magic!) / 600;
       break;
   }
 
-  // Add random variation (±10%)
-  const variation = 0.9 + Math.random() * 0.2;
-  return Math.round(baseDamage * variation);
+  // Add smaller random variation (±5%)
+  const variation = 0.95 + Math.random() * 0.1;
+
+  // Ensure minimum damage of 1
+  return Math.max(1, Math.round(baseDamage * variation));
 }
 
 // Function to check if a move can be used based on stats
