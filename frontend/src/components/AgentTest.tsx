@@ -1,5 +1,5 @@
-import { useAccount, useReadContract } from "wagmi";
-import { useState } from "react";
+import { useAccount, useReadContract, usePublicClient } from "wagmi";
+import { useState, useEffect } from "react";
 import { createAgent } from "../systems/agent/traitParser";
 import { SPECIAL_MOVES, type MoveType } from "../systems/agent/specialMoves";
 import type { Agent } from "../systems/agent/types";
@@ -37,6 +37,16 @@ const nftAbi = [
         type: "tuple",
       },
     ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "index", type: "uint256" },
+    ],
+    name: "tokenOfOwnerByIndex",
+    outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
     type: "function",
   },
@@ -169,6 +179,7 @@ function MoveCard({ moveName }: { moveName: string }) {
 
 export function AgentTest() {
   const { address, isConnected } = useAccount();
+  const publicClient = usePublicClient();
   const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null);
   const [selectedOpponentId, setSelectedOpponentId] = useState<number | null>(
     null
@@ -176,9 +187,12 @@ export function AgentTest() {
   const [showBattle, setShowBattle] = useState(false);
   const [apiKey, setApiKey] = useState<string>(OPENAI_API_KEY || "");
   const [showApiKeyInput, setShowApiKeyInput] = useState(!OPENAI_API_KEY);
+  const [ownedTokenIds, setOwnedTokenIds] = useState<number[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Get user's NFT balance
-  const { data: balance } = useReadContract({
+  const { data: balance, isError: balanceError } = useReadContract({
     address: CONTRACT_ADDRESS,
     abi: nftAbi,
     functionName: "balanceOf",
@@ -187,6 +201,51 @@ export function AgentTest() {
       enabled: !!address,
     },
   });
+
+  // Fetch all owned token IDs when balance changes
+  useEffect(() => {
+    const fetchOwnedTokenIds = async () => {
+      if (!balance || !address || !publicClient) {
+        console.log("Missing requirements:", {
+          balance,
+          address,
+          publicClient,
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      console.log("Fetching token IDs for address:", address);
+      console.log("NFT Balance:", balance.toString());
+
+      try {
+        setIsLoading(true);
+        const tokenIds: number[] = [];
+
+        for (let i = 0; i < Number(balance); i++) {
+          const result = await publicClient.readContract({
+            address: CONTRACT_ADDRESS,
+            abi: nftAbi,
+            functionName: "tokenOfOwnerByIndex",
+            args: [address, BigInt(i)],
+          });
+
+          console.log(`Token ID at index ${i}:`, result);
+          tokenIds.push(Number(result));
+        }
+
+        console.log("All fetched token IDs:", tokenIds);
+        setOwnedTokenIds(tokenIds);
+      } catch (err) {
+        console.error("Error fetching token IDs:", err);
+        setError("Failed to load your NFTs. Please try refreshing the page.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchOwnedTokenIds();
+  }, [balance, address, publicClient]);
 
   // Get NFT traits from the contract
   const { data: nftTraits } = useReadContract({
@@ -249,10 +308,17 @@ export function AgentTest() {
     );
   }
 
-  // For testing, create an array of token IDs based on the balance
-  const tokenIds = balance
-    ? Array.from({ length: Number(balance) }, (_, i) => i)
-    : [];
+  if (balanceError) {
+    return (
+      <div className="text-center py-8">
+        <h2 className="text-2xl font-bold text-red-500">Error Loading NFTs</h2>
+        <p className="mt-4 text-gray-400">
+          There was an error loading your NFTs. Please check your wallet
+          connection and try again.
+        </p>
+      </div>
+    );
+  }
 
   if (showBattle && agent1 && agent2) {
     return <BattleArena agent1={agent1} agent2={agent2} apiKey={apiKey} />;
@@ -262,144 +328,177 @@ export function AgentTest() {
     <div className="p-8">
       <h2 className="text-2xl font-bold mb-6">Your NFT Agents</h2>
 
-      {/* Token Selection */}
-      <div className="flex gap-4 mb-8 overflow-x-auto pb-4">
-        {tokenIds.map((tokenId) => (
-          <button
-            key={tokenId}
-            onClick={() => setSelectedTokenId(tokenId)}
-            className={`px-4 py-2 rounded-lg transition-all ${
-              selectedTokenId === tokenId
-                ? "bg-purple-600 text-white"
-                : "bg-purple-200 text-purple-800 hover:bg-purple-300"
-            }`}
-          >
-            NFT #{tokenId}
-          </button>
-        ))}
-      </div>
-
-      {/* Agent Display */}
-      {agent1 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Left Column: Traits and Stats */}
-          <div className="space-y-6">
-            {/* Traits Section */}
-            <div className="bg-purple-900/20 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-4">Traits</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {Object.entries(agent1.traits).map(([trait, value]) => (
-                  <div key={trait} className="flex justify-between">
-                    <span className="capitalize text-purple-200">{trait}:</span>
-                    <span className="text-white">{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Base Stats Section */}
-            <div className="bg-blue-900/20 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-4">Base Stats</h3>
-              <div className="space-y-3">
-                {Object.entries(agent1.stats).map(([stat, value]) => (
-                  <div key={stat} className="space-y-1">
-                    <div className="flex justify-between">
-                      <span className="capitalize text-blue-200">{stat}:</span>
-                      <span className="text-white">{value}/30</span>
-                    </div>
-                    <StatBar value={value} maxValue={30} color="bg-blue-500" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Skills and Special Moves */}
-          <div className="space-y-6">
-            {/* Combat Skills Section */}
-            <div className="bg-green-900/20 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-4">Combat Skills</h3>
-              <div className="space-y-3">
-                {Object.entries(agent1.skills).map(([skill, value]) => (
-                  <div key={skill} className="space-y-1">
-                    <div className="flex justify-between">
-                      <span className="capitalize text-green-200">
-                        {skill}:
-                      </span>
-                      <span className="text-white">{value}/25</span>
-                    </div>
-                    <StatBar value={value} maxValue={25} color="bg-green-500" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Enhanced Special Moves Section */}
-            <div className="bg-gray-900/50 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-4">Special Moves</h3>
-              {agent1.specialMoves && agent1.specialMoves.length > 0 ? (
-                <div className="grid gap-4">
-                  {agent1.specialMoves.map((moveName) => {
-                    console.log("Rendering move:", moveName);
-                    return <MoveCard key={moveName} moveName={moveName} />;
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-8 bg-gray-800/50 rounded-lg">
-                  <p className="text-gray-400 mb-2">
-                    No special moves unlocked yet
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Your NFT traits determine which moves you can unlock!
-                  </p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Current traits:{" "}
-                    {Object.entries(agent1.traits)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(", ")}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Battle Section */}
-            <div className="bg-gray-900/50 p-4 rounded-lg">
-              <h3 className="text-xl font-bold mb-4">Battle</h3>
-
-              {/* Opponent Selection */}
-              <div className="mb-4">
-                <h4 className="text-lg mb-2">Select Opponent</h4>
-                <div className="flex gap-2 overflow-x-auto pb-2">
-                  {tokenIds
-                    .filter((id) => id !== selectedTokenId)
-                    .map((tokenId) => (
-                      <button
-                        key={tokenId}
-                        onClick={() => setSelectedOpponentId(tokenId)}
-                        className={`px-3 py-1 rounded-lg transition-all ${
-                          selectedOpponentId === tokenId
-                            ? "bg-red-600 text-white"
-                            : "bg-red-200 text-red-800 hover:bg-red-300"
-                        }`}
-                      >
-                        NFT #{tokenId}
-                      </button>
-                    ))}
-                </div>
-              </div>
-
-              {/* Battle Button */}
-              {selectedOpponentId !== null && (
-                <button
-                  onClick={startBattle}
-                  className="w-full py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-all"
-                >
-                  Start Battle
-                </button>
-              )}
-            </div>
-          </div>
+      {error && (
+        <div className="bg-red-900/50 text-red-200 p-4 rounded-lg mb-6">
+          {error}
         </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
+          <p className="mt-4 text-gray-400">Loading your NFTs...</p>
+        </div>
+      ) : (
+        <>
+          {/* Token Selection */}
+          {ownedTokenIds.length > 0 ? (
+            <div className="flex gap-4 mb-8 overflow-x-auto pb-4">
+              {ownedTokenIds.map((tokenId) => (
+                <button
+                  key={tokenId}
+                  onClick={() => setSelectedTokenId(tokenId)}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    selectedTokenId === tokenId
+                      ? "bg-purple-600 text-white"
+                      : "bg-purple-200 text-purple-800 hover:bg-purple-300"
+                  }`}
+                >
+                  NFT #{tokenId}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-gray-400">No NFTs found in your wallet.</p>
+            </div>
+          )}
+
+          {/* Agent Display */}
+          {agent1 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Left Column: Traits and Stats */}
+              <div className="space-y-6">
+                {/* Traits Section */}
+                <div className="bg-purple-900/20 p-4 rounded-lg">
+                  <h3 className="text-xl font-semibold mb-4">Traits</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    {Object.entries(agent1.traits).map(([trait, value]) => (
+                      <div key={trait} className="flex justify-between">
+                        <span className="capitalize text-purple-200">
+                          {trait}:
+                        </span>
+                        <span className="text-white">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Base Stats Section */}
+                <div className="bg-blue-900/20 p-4 rounded-lg">
+                  <h3 className="text-xl font-semibold mb-4">Base Stats</h3>
+                  <div className="space-y-3">
+                    {Object.entries(agent1.stats).map(([stat, value]) => (
+                      <div key={stat} className="space-y-1">
+                        <div className="flex justify-between">
+                          <span className="capitalize text-blue-200">
+                            {stat}:
+                          </span>
+                          <span className="text-white">{value}/30</span>
+                        </div>
+                        <StatBar
+                          value={value}
+                          maxValue={30}
+                          color="bg-blue-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Skills and Special Moves */}
+              <div className="space-y-6">
+                {/* Combat Skills Section */}
+                <div className="bg-green-900/20 p-4 rounded-lg">
+                  <h3 className="text-xl font-semibold mb-4">Combat Skills</h3>
+                  <div className="space-y-3">
+                    {Object.entries(agent1.skills).map(([skill, value]) => (
+                      <div key={skill} className="space-y-1">
+                        <div className="flex justify-between">
+                          <span className="capitalize text-green-200">
+                            {skill}:
+                          </span>
+                          <span className="text-white">{value}/25</span>
+                        </div>
+                        <StatBar
+                          value={value}
+                          maxValue={25}
+                          color="bg-green-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Enhanced Special Moves Section */}
+                <div className="bg-gray-900/50 p-4 rounded-lg">
+                  <h3 className="text-xl font-semibold mb-4">Special Moves</h3>
+                  {agent1.specialMoves && agent1.specialMoves.length > 0 ? (
+                    <div className="grid gap-4">
+                      {agent1.specialMoves.map((moveName) => {
+                        console.log("Rendering move:", moveName);
+                        return <MoveCard key={moveName} moveName={moveName} />;
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 bg-gray-800/50 rounded-lg">
+                      <p className="text-gray-400 mb-2">
+                        No special moves unlocked yet
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Your NFT traits determine which moves you can unlock!
+                      </p>
+                      <p className="text-sm text-gray-500 mt-2">
+                        Current traits:{" "}
+                        {Object.entries(agent1.traits)
+                          .map(([key, value]) => `${key}: ${value}`)
+                          .join(", ")}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Battle Section */}
+                <div className="bg-gray-900/50 p-4 rounded-lg">
+                  <h3 className="text-xl font-bold mb-4">Battle</h3>
+
+                  {/* Opponent Selection */}
+                  <div className="mb-4">
+                    <h4 className="text-lg mb-2">Select Opponent</h4>
+                    <div className="flex gap-2 overflow-x-auto pb-2">
+                      {ownedTokenIds
+                        .filter((id) => id !== selectedTokenId)
+                        .map((tokenId) => (
+                          <button
+                            key={tokenId}
+                            onClick={() => setSelectedOpponentId(tokenId)}
+                            className={`px-3 py-1 rounded-lg transition-all ${
+                              selectedOpponentId === tokenId
+                                ? "bg-red-600 text-white"
+                                : "bg-red-200 text-red-800 hover:bg-red-300"
+                            }`}
+                          >
+                            NFT #{tokenId}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Battle Button */}
+                  {selectedOpponentId !== null && (
+                    <button
+                      onClick={startBattle}
+                      className="w-full py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-all"
+                    >
+                      Start Battle
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* API Key Modal */}
