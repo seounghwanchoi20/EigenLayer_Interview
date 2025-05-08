@@ -17,6 +17,11 @@ export interface Stats {
   intelligence: number;
   charisma: number;
   vitality: number;
+  stealth?: number;
+  defense?: number;
+  magic?: number;
+  comfort?: number;
+  speed?: number;
 }
 
 export interface Skills {
@@ -31,6 +36,7 @@ export interface Agent {
   traits: Trait;
   stats: Stats;
   skills: Skills;
+  specialMoves: string[];
   level: number;
   experience: number;
 }
@@ -38,3 +44,10 @@ export interface Agent {
 export type TraitCategory = keyof Trait;
 export type StatCategory = keyof Stats;
 export type SkillCategory = keyof Skills;
+
+export interface SpecialMove {
+  name: string;
+  requirements: Partial<Stats>;
+  effect?: string;
+  cooldown?: number;
+}

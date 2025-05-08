@@ -1,6 +1,8 @@
 import { useAccount, useContractRead } from "wagmi";
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { createAgent } from "../systems/agent/traitParser";
+import type { Agent, Trait } from "../systems/agent/types";
 
 const CONTRACT_ADDRESS = "0xE835d7E3674fF39699C0843cc0A68cdB873D8529";
 
@@ -35,15 +37,22 @@ const NFTGallery = () => {
       stateMutability: "view",
       type: "function",
     },
-  ];
+  ] as const;
 
   const { data: traits, isLoading } = useContractRead({
     address: CONTRACT_ADDRESS,
     abi,
     functionName: "getNFTTraits",
-    args: [selectedNFT || 0],
-    enabled: selectedNFT !== null,
+    args: selectedNFT !== null ? [BigInt(selectedNFT)] : undefined,
+    query: {
+      enabled: selectedNFT !== null,
+    },
   });
+
+  // Create agent from traits
+  const agent: Agent | null = traits
+    ? createAgent(selectedNFT || 0, traits as unknown as Trait)
+    : null;
 
   if (!isConnected) {
     return (
@@ -54,6 +63,23 @@ const NFTGallery = () => {
       </div>
     );
   }
+
+  const StatBar = ({
+    value,
+    maxValue,
+    color,
+  }: {
+    value: number;
+    maxValue: number;
+    color: string;
+  }) => (
+    <div className="w-full bg-gray-700 rounded-full h-2">
+      <div
+        className={`${color} h-2 rounded-full transition-all duration-500`}
+        style={{ width: `${(value / maxValue) * 100}%` }}
+      />
+    </div>
+  );
 
   return (
     <div>
@@ -68,18 +94,80 @@ const NFTGallery = () => {
             onClick={() => setSelectedNFT(tokenId)}
           >
             <h3 className="text-xl font-bold mb-2">Arena Fighter #{tokenId}</h3>
-            {selectedNFT === tokenId && traits && (
-              <div className="space-y-1 text-sm">
-                <p>Background: {traits.background}</p>
-                <p>Skin: {traits.skin}</p>
-                <p>Eyes: {traits.eyes}</p>
-                <p>Mouth: {traits.mouth}</p>
-                <p>Headwear: {traits.headwear}</p>
-                <p>Clothes: {traits.clothes}</p>
-                <p>Accessory: {traits.accessory}</p>
-                <p>Special: {traits.special}</p>
-                <p>Mood: {traits.mood}</p>
-                <p>Weather: {traits.weather}</p>
+            {selectedNFT === tokenId && traits && agent && (
+              <div className="space-y-4">
+                {/* Traits Section */}
+                <div className="space-y-1 text-sm">
+                  <h4 className="text-purple-400 font-semibold mb-2">Traits</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(Object.entries(traits) as [string, string][]).map(
+                      ([trait, value]) => (
+                        <div key={trait} className="flex justify-between">
+                          <span className="capitalize">{trait}:</span>
+                          <span className="text-purple-300">{value}</span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats Section */}
+                <div>
+                  <h4 className="text-purple-400 font-semibold mb-2">Stats</h4>
+                  <div className="space-y-2">
+                    {Object.entries(agent.stats).map(([stat, value]) => (
+                      <div key={stat} className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="capitalize">{stat}</span>
+                          <span>{value}/30</span>
+                        </div>
+                        <StatBar
+                          value={value}
+                          maxValue={30}
+                          color="bg-blue-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Skills Section */}
+                <div>
+                  <h4 className="text-purple-400 font-semibold mb-2">Skills</h4>
+                  <div className="space-y-2">
+                    {Object.entries(agent.skills).map(([skill, value]) => (
+                      <div key={skill} className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="capitalize">{skill}</span>
+                          <span>{value}/25</span>
+                        </div>
+                        <StatBar
+                          value={value}
+                          maxValue={25}
+                          color="bg-green-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Level and Experience */}
+                <div>
+                  <h4 className="text-purple-400 font-semibold mb-2">
+                    Progress
+                  </h4>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span>Level {agent.level}</span>
+                      <span>{agent.experience}/100 XP</span>
+                    </div>
+                    <StatBar
+                      value={agent.experience}
+                      maxValue={100}
+                      color="bg-yellow-500"
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </motion.div>
