@@ -194,24 +194,27 @@ class GameServer {
             console.warn("[Battle Action] Battle not found");
             return;
         }
-        // Log initial health values
-        console.log(`[Battle Action] Initial health values:`, {
-            player1Health: battle.player1Health,
-            player2Health: battle.player2Health,
-        });
+        // Store old health values
+        const oldPlayer1Health = battle.player1Health;
+        const oldPlayer2Health = battle.player2Health;
         // Calculate new health values
         const damage = data.action.damage || 0;
         console.log(`[Battle Action] Processing damage: ${damage}`);
-        let myNewHealth, opponentNewHealth;
+        // Initialize health variables
+        let myNewHealth;
+        let opponentNewHealth;
+        // Update health based on who is attacking
         if (player.id === battle.player1) {
+            // Player 1 attacking Player 2
             battle.player2Health = Math.max(0, battle.player2Health - damage);
-            myNewHealth = battle.player1Health;
-            opponentNewHealth = battle.player2Health;
+            myNewHealth = oldPlayer1Health; // Attacker's health unchanged
+            opponentNewHealth = battle.player2Health; // Defender's new health
         }
         else {
+            // Player 2 attacking Player 1
             battle.player1Health = Math.max(0, battle.player1Health - damage);
-            myNewHealth = battle.player2Health;
-            opponentNewHealth = battle.player1Health;
+            myNewHealth = oldPlayer2Health; // Attacker's health unchanged
+            opponentNewHealth = battle.player1Health; // Defender's new health
         }
         // Log health updates
         console.log(`[Battle Action] Updated health values:`, {
@@ -222,8 +225,11 @@ class GameServer {
         });
         // Update battle state
         battle.lastAction = data.action;
-        battle.currentTurn =
-            battle.player1 === player.id ? battle.player2 : battle.player1;
+        // Only switch turns if both players are still alive
+        if (battle.player1Health > 0 && battle.player2Health > 0) {
+            battle.currentTurn =
+                battle.player1 === player.id ? battle.player2 : battle.player1;
+        }
         this.battles.set(battle.id, battle);
         // Get opponent
         const opponentId = battle.player1 === player.id ? battle.player2 : battle.player1;
@@ -240,36 +246,16 @@ class GameServer {
                 damage: data.action.damage || 0,
                 effects: data.action.effects || [],
             },
-            myHealth: player.id === battle.player1
-                ? battle.player2Health
-                : battle.player1Health,
-            opponentHealth: player.id === battle.player1
-                ? battle.player1Health
-                : battle.player2Health,
+            myHealth: opponentNewHealth, // Opponent receives their new health
+            opponentHealth: myNewHealth, // And attacker's unchanged health
             battleId: battle.id,
         };
-        // Debug log for health values
-        console.log(`[Battle Action] Preparing opponent message:`, {
-            playerId,
-            isPlayer1: player.id === battle.player1,
-            healthValues: {
-                player1Health: battle.player1Health,
-                player2Health: battle.player2Health,
-                sentMyHealth: opponentMessage.myHealth,
-                sentOpponentHealth: opponentMessage.opponentHealth,
-            },
-            fullMessage: opponentMessage,
-        });
         // Send confirmation to player with health updates
         const playerMessage = {
             type: "action_confirmed",
             battleId: battle.id,
-            myHealth: player.id === battle.player1
-                ? battle.player1Health
-                : battle.player2Health,
-            opponentHealth: player.id === battle.player1
-                ? battle.player2Health
-                : battle.player1Health,
+            myHealth: myNewHealth, // Attacker's unchanged health
+            opponentHealth: opponentNewHealth, // Defender's new health
         };
         // Ensure messages are properly stringified
         const opponentMessageString = JSON.stringify(opponentMessage);
@@ -280,9 +266,14 @@ class GameServer {
         });
         opponent.ws.send(opponentMessageString);
         player.ws.send(playerMessageString);
-        console.log(`Player ${playerId} performed action:`, data.action);
-        console.log(`Damage calculated: ${damage}`);
-        console.log(`Updated health - Player 1: ${battle.player1Health}, Player 2: ${battle.player2Health}`);
+        // Log final state
+        console.log(`[Battle Action] Final state:`, {
+            playerId,
+            damage,
+            player1Health: battle.player1Health,
+            player2Health: battle.player2Health,
+            currentTurn: battle.currentTurn,
+        });
     }
     handleBattleReady(playerId, battleId) {
         console.log(`[Battle] Received battle_ready from player ${playerId} for battle ${battleId}`);

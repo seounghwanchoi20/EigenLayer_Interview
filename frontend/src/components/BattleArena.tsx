@@ -525,52 +525,133 @@ export function BattleArena({
     max: number;
   }>({ current: 100, max: 100 });
 
-  const updateHealth = (agentNumber: 1 | 2, newHealth: number) => {
-    console.log(
-      `[Health] Server setting Agent ${agentNumber} health to:`,
-      newHealth
-    );
+  // New state variables for action queue management
+  const [isProcessingAction, setIsProcessingAction] = useState<boolean>(false);
+  const [actionQueue, setActionQueue] = useState<any[]>([]);
+  const [lastProcessedAction, setLastProcessedAction] = useState<string | null>(
+    null
+  );
 
-    if (agentNumber === 1) {
-      setAgent1Health((prev) => {
-        const updated = { ...prev, current: newHealth };
-        console.log(`[Health] Agent 1 health updated:`, updated);
-        return updated;
-      });
-    } else {
-      setAgent2Health((prev) => {
-        const updated = { ...prev, current: newHealth };
-        console.log(`[Health] Agent 2 health updated:`, updated);
-        return updated;
-      });
+  // Function to update health with bounds checking
+  const updateHealth = (agentNum: 1 | 2, newHealth: number) => {
+    const updateFunc = agentNum === 1 ? setAgent1Health : setAgent2Health;
+    const currentState = agentNum === 1 ? agent1Health : agent2Health;
+
+    // Ensure health is never negative
+    const sanitizedHealth = Math.max(0, newHealth);
+
+    updateFunc((prev) => ({
+      ...prev,
+      current: sanitizedHealth,
+    }));
+
+    console.log(
+      `[Health] Agent ${agentNum} health updated to:`,
+      sanitizedHealth
+    );
+    return sanitizedHealth;
+  };
+
+  // Process the next action in the queue
+  const processNextAction = async () => {
+    if (isProcessingAction || actionQueue.length === 0) return;
+
+    try {
+      setIsProcessingAction(true);
+
+      const nextAction = actionQueue[0];
+      console.log("[Action Queue] Processing next action:", nextAction);
+
+      if (nextAction.type === "opponent_action") {
+        await handleOpponentAction(nextAction.data);
+      } else if (nextAction.type === "action_confirmed") {
+        handleActionConfirmed(nextAction.data);
+      } else if (nextAction.type === "simulate_turn") {
+        await simulateTurn();
+      }
+
+      // Remove the processed action from the queue
+      setActionQueue((prevQueue) => prevQueue.slice(1));
+      setLastProcessedAction(JSON.stringify(nextAction));
+    } catch (error) {
+      console.error("[Action Queue] Error processing action:", error);
+
+      // Reset states on error to prevent stuck game
+      setAttackingAgent(null);
+      setHitAgent(null);
+      setCurrentAttack(null);
+
+      // Continue turn if it's player's turn
+      if (winner === null) {
+        setIsMyTurn(true);
+        setWaitingForOpponent(false);
+      }
+    } finally {
+      setIsProcessingAction(false);
     }
   };
 
-  const handleOpponentDisconnect = () => {
-    setBattleLog((prev) => [...prev, "Opponent disconnected from the battle!"]);
-    setWinner(agent1.id); // You win if opponent disconnects
-  };
+  // Add listener for opponent action
+  useEffect(() => {
+    const handleOpponentActionEvent = (data: any) => {
+      console.log("[Battle] Queuing opponent action:", data);
+      setActionQueue((prev) => [...prev, { type: "opponent_action", data }]);
+    };
+
+    const handleActionConfirmedEvent = (data: any) => {
+      console.log("[Battle] Queuing action confirmation:", data);
+      setActionQueue((prev) => [...prev, { type: "action_confirmed", data }]);
+    };
+
+    matchmaking.on("opponent_action", handleOpponentActionEvent);
+    matchmaking.on("action_confirmed", handleActionConfirmedEvent);
+
+    return () => {
+      matchmaking.off("opponent_action", handleOpponentActionEvent);
+      matchmaking.off("action_confirmed", handleActionConfirmedEvent);
+    };
+  }, []);
+
+  // Process action queue when available
+  useEffect(() => {
+    if (actionQueue.length > 0 && !isProcessingAction) {
+      processNextAction();
+    }
+  }, [actionQueue, isProcessingAction]);
+
+  // Monitor battle state to trigger player turn
+  useEffect(() => {
+    if (
+      isSimulating &&
+      isMyTurn &&
+      !waitingForOpponent &&
+      !isProcessingAction
+    ) {
+      console.log("[Battle] Auto-triggering player turn");
+      setActionQueue((prev) => [...prev, { type: "simulate_turn", data: {} }]);
+    }
+  }, [isSimulating, isMyTurn, waitingForOpponent, isProcessingAction]);
 
   const handleOpponentAction = async (action: any) => {
     if (!battleAgent1 || !battleAgent2) return;
 
-    console.log("[Battle] Received opponent attack:", action);
+    console.log("[Battle] Processing opponent attack:", action);
     setWaitingForOpponent(false);
 
     try {
       // Play attack animation first
       setAttackingAgent(2);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Increased from 500ms
 
       const moveType = SPECIAL_MOVES[action.moveName]?.type || "Physical";
       setCurrentAttack({ type: moveType, position: "right" });
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 1500)); // Increased from 800ms
 
       setHitAgent(1);
       setCurrentAttack(null);
 
       // Wait for all animations before updating health and showing damage
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 500)); // Increased from 200ms
 
       // Update health values from server
       if (
@@ -578,22 +659,23 @@ export function BattleArena({
         action.opponentHealth !== undefined
       ) {
         const oldHealth = agent1Health.current;
-        const actualDamage = oldHealth - action.myHealth;
+        const newHealth = Math.max(0, action.myHealth); // Ensure health is never negative
+        const actualDamage = Math.max(0, oldHealth - newHealth);
 
         // Update both healths simultaneously
-        updateHealth(1, action.myHealth);
+        updateHealth(1, newHealth);
         updateHealth(2, action.opponentHealth);
 
         // Update battle agents' health
         if (battleAgent1) {
-          battleAgent1.getBattleState().currentHealth = action.myHealth;
+          battleAgent1.getBattleState().currentHealth = newHealth;
         }
         if (battleAgent2) {
           battleAgent2.getBattleState().currentHealth = action.opponentHealth;
         }
 
         // Check for defeat
-        if (action.myHealth <= 0) {
+        if (newHealth <= 0) {
           setWinner(agent2.id);
           setBattleLog((prev) => [
             ...prev,
@@ -609,7 +691,7 @@ export function BattleArena({
             action.battleMessage ||
             `Opponent used ${action.moveName}! Dealt ${actualDamage} damage.`;
           setBattleLog((prev) => [...prev, battleMessage]);
-          await new Promise((resolve) => setTimeout(resolve, 1200));
+          await new Promise((resolve) => setTimeout(resolve, 2000)); // Increased from 1200ms
           setDamageNumber(null);
         }
       }
@@ -623,55 +705,80 @@ export function BattleArena({
       }
     } catch (error) {
       console.error("Error handling opponent action:", error);
+      // Reset animation states on error
+      setAttackingAgent(null);
+      setHitAgent(null);
+      setCurrentAttack(null);
+
+      // Continue player turn on error recovery
+      if (winner === null) {
+        setIsMyTurn(true);
+      }
     }
   };
 
   const handleActionConfirmed = (data: any) => {
-    console.log("[Battle] Action confirmed by server:", data);
+    console.log("[Battle] Processing action confirmation:", data);
 
     if (!data) {
       console.error("[Error] Server response is undefined.");
       return;
     }
 
-    // Update both healths simultaneously when server confirms
-    if (data.myHealth !== undefined && data.opponentHealth !== undefined) {
-      // Update health state
-      updateHealth(1, data.myHealth);
-      updateHealth(2, data.opponentHealth);
+    try {
+      // Update both healths simultaneously when server confirms
+      if (data.myHealth !== undefined && data.opponentHealth !== undefined) {
+        // Update health state
+        const myNewHealth = Math.max(0, data.myHealth);
+        const opponentNewHealth = Math.max(0, data.opponentHealth);
 
-      // Update battle agents' health
-      if (battleAgent1) {
-        battleAgent1.getBattleState().currentHealth = data.myHealth;
+        updateHealth(1, myNewHealth);
+        updateHealth(2, opponentNewHealth);
+
+        // Update battle agents' health
+        if (battleAgent1) {
+          battleAgent1.getBattleState().currentHealth = myNewHealth;
+        }
+        if (battleAgent2) {
+          battleAgent2.getBattleState().currentHealth = opponentNewHealth;
+        }
+
+        // Check for defeat after health update
+        if (opponentNewHealth <= 0) {
+          setWinner(agent1.id);
+          setBattleLog((prev) => [
+            ...prev,
+            `Victory! You defeated Agent #${agent2.id}!`,
+          ]);
+          return;
+        }
       }
-      if (battleAgent2) {
-        battleAgent2.getBattleState().currentHealth = data.opponentHealth;
+
+      // Update battle message if server provided one
+      if (data.battleMessage) {
+        setBattleLog((prev) => {
+          const newLog = [...prev];
+          if (newLog.length > 0) {
+            newLog[newLog.length - 1] = data.battleMessage;
+          } else {
+            newLog.push(data.battleMessage);
+          }
+          return newLog;
+        });
       }
 
-      // Check for defeat after health update
-      if (data.opponentHealth <= 0) {
-        setWinner(agent1.id);
-        setBattleLog((prev) => [
-          ...prev,
-          `Victory! You defeated Agent #${agent2.id}!`,
-        ]);
-        return;
+      // Only set waiting and turn if no winner yet
+      if (winner === null) {
+        setWaitingForOpponent(true);
+        setIsMyTurn(false);
       }
-    }
-
-    // Update battle message if server provided one
-    if (data.battleMessage) {
-      setBattleLog((prev) => {
-        const newLog = [...prev];
-        newLog[newLog.length - 1] = data.battleMessage;
-        return newLog;
-      });
-    }
-
-    // Only set waiting and turn if no winner yet
-    if (winner === null) {
-      setWaitingForOpponent(true);
-      setIsMyTurn(false);
+    } catch (error) {
+      console.error("Error handling action confirmation:", error);
+      // Recover from error by continuing battle
+      if (winner === null) {
+        setIsMyTurn(true);
+        setWaitingForOpponent(false);
+      }
     }
   };
 
@@ -717,23 +824,23 @@ export function BattleArena({
 
       // Play attack animation
       setAttackingAgent(1);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Increased from 500ms
 
       const moveType = SPECIAL_MOVES[moveDecision]?.type || "Physical";
       setCurrentAttack({ type: moveType, position: "left" });
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 1500)); // Increased from 800ms
 
       setHitAgent(2);
       setCurrentAttack(null);
 
       // Wait for all animations before showing damage
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 500)); // Increased from 200ms
 
       // Show damage number animation (actual health update will come from server)
       if (moveResult.damage) {
         setDamageNumber({ damage: moveResult.damage, position: "right" });
         setBattleLog((prev) => [...prev, battleMessage]);
-        await new Promise((resolve) => setTimeout(resolve, 1200));
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // Increased from 1200ms
         setDamageNumber(null);
       }
 
@@ -745,60 +852,79 @@ export function BattleArena({
       setIsMyTurn(false);
     } catch (error) {
       console.error("Error during battle simulation:", error);
+      // Reset animation states on error
+      setAttackingAgent(null);
+      setHitAgent(null);
+      setCurrentAttack(null);
+      setDamageNumber(null);
+
+      // Retry or recover turn
+      if (winner === null) {
+        setIsMyTurn(true);
+        setWaitingForOpponent(false);
+      }
     }
   };
 
   const handleBattleStart = useCallback(
     (data: any) => {
-      console.log("Battle start received:", data);
+      console.log("[Battle] Battle start received:", data);
       const { opponent, isFirstTurn, myHealth, opponentHealth } = data;
 
-      // Initialize health values from server
-      setAgent1Health({
-        current: isFirstTurn ? myHealth : opponentHealth,
-        max: 100,
-      });
-      setAgent2Health({
-        current: isFirstTurn ? opponentHealth : myHealth,
-        max: 100,
-      });
+      try {
+        // Initialize health values from server or use defaults
+        const initialMyHealth =
+          myHealth !== undefined ? Math.max(0, myHealth) : 100;
+        const initialOpponentHealth =
+          opponentHealth !== undefined ? Math.max(0, opponentHealth) : 100;
 
-      // Initialize battle agents
-      const myAgent = new BattleAgent(agent1);
-      const opponentAgent = new BattleAgent(agent2);
+        // Initialize battle agents
+        const myAgent = new BattleAgent(agent1);
+        const opponentAgent = new BattleAgent(agent2);
 
-      // Update their health from server values
-      if (myHealth !== undefined && opponentHealth !== undefined) {
+        // Update their health from server values or defaults
         const myState = myAgent.getBattleState();
         const opponentState = opponentAgent.getBattleState();
-        myState.currentHealth = isFirstTurn ? myHealth : opponentHealth;
-        opponentState.currentHealth = isFirstTurn ? opponentHealth : myHealth;
-      }
 
-      setBattleAgent1(myAgent);
-      setBattleAgent2(opponentAgent);
-      setIsMyTurn(isFirstTurn);
-      setOpponentReady(true);
-      setIsReady(true);
+        myState.currentHealth = initialMyHealth;
+        opponentState.currentHealth = initialOpponentHealth;
 
-      // Reset health to initial values
-      if (myAgent && opponentAgent) {
+        setBattleAgent1(myAgent);
+        setBattleAgent2(opponentAgent);
+
+        // Set health display
         setAgent1Health({
-          current: myAgent.getBattleState().currentHealth,
-          max: myAgent.getBattleState().maxHealth,
+          current: initialMyHealth,
+          max: myState.maxHealth,
         });
         setAgent2Health({
-          current: opponentAgent.getBattleState().currentHealth,
-          max: opponentAgent.getBattleState().maxHealth,
+          current: initialOpponentHealth,
+          max: opponentState.maxHealth,
         });
-      }
 
-      setBattleLog((prev) => [
-        ...prev,
-        `Battle started! ${
-          isFirstTurn ? "You go first!" : "Opponent goes first!"
-        }`,
-      ]);
+        // Set battle state
+        setIsMyTurn(isFirstTurn);
+        setOpponentReady(true);
+        setIsReady(true);
+        setIsSimulating(true);
+
+        // Clear action queue on battle start
+        setActionQueue([]);
+        setIsProcessingAction(false);
+
+        setBattleLog((prev) => [
+          ...prev,
+          `Battle started! ${
+            isFirstTurn ? "You go first!" : "Opponent goes first!"
+          }`,
+        ]);
+      } catch (error) {
+        console.error("Error during battle start:", error);
+        setBattleLog((prev) => [
+          ...prev,
+          "Error starting battle: " + (error as Error).message,
+        ]);
+      }
     },
     [agent1, agent2]
   );
@@ -815,10 +941,10 @@ export function BattleArena({
         agent2: { id: agent2.id, traits: agent2.traits },
       });
 
-      const ba1 = new BattleAgent(agent1);
-      const ba2 = new BattleAgent(agent2);
-
       try {
+        const ba1 = new BattleAgent(agent1);
+        const ba2 = new BattleAgent(agent2);
+
         console.log("Initializing Agent 1...");
         await ba1.initialize(apiKey);
         if (!mounted) return;
@@ -834,11 +960,11 @@ export function BattleArena({
         const agent2State = ba2.getBattleState();
 
         setAgent1Health({
-          current: agent1State.currentHealth,
+          current: agent1State.maxHealth, // Use max health at start
           max: agent1State.maxHealth,
         });
         setAgent2Health({
-          current: agent2State.currentHealth,
+          current: agent2State.maxHealth, // Use max health at start
           max: agent2State.maxHealth,
         });
 
@@ -863,7 +989,7 @@ export function BattleArena({
       }
     };
 
-    // Set up battle synchronization listeners first
+    // Set up battle synchronization listeners
     console.log("Setting up battle event listeners...");
 
     const handleBattleCreated = (data: any) => {
@@ -874,7 +1000,7 @@ export function BattleArena({
       setBattleLog((prev) => [...prev, "Battle connection established!"]);
     };
 
-    const handleBattleStart = (data: any) => {
+    const handleBattleStartEvent = (data: any) => {
       if (!mounted) return;
       console.log("[Battle] Received battle_start event:", {
         data,
@@ -886,82 +1012,37 @@ export function BattleArena({
         },
       });
 
-      // Set all necessary state for battle to begin
-      setIsMyTurn(data.isFirstTurn);
-      setBattleInitialized(true);
-      setIsSimulating(true);
-      setOpponentReady(true);
-      setIsReady(true);
-
-      // Reset health to initial values
-      if (battleAgent1 && battleAgent2) {
-        setAgent1Health({
-          current: battleAgent1.getBattleState().currentHealth,
-          max: battleAgent1.getBattleState().maxHealth,
-        });
-        setAgent2Health({
-          current: battleAgent2.getBattleState().currentHealth,
-          max: battleAgent2.getBattleState().maxHealth,
-        });
-      }
-
-      setBattleLog((prev) => [
-        ...prev,
-        `Battle started! ${
-          data.isFirstTurn ? "You go first!" : "Opponent goes first!"
-        }`,
-      ]);
+      // Full battle initialization through our callback
+      handleBattleStart(data);
     };
 
-    const handleOpponentReadyEvent = () => {
+    const handleOpponentDisconnected = () => {
       if (!mounted) return;
-      console.log("[Battle] Received opponent_ready event, current state:", {
-        isReady,
-        opponentReady,
-        battleInitialized,
-        isSimulating,
-      });
-      setOpponentReady(true);
-      setBattleLog((prev) => [...prev, "Opponent is ready!"]);
+      console.log("[Battle] Opponent disconnected");
+
+      setBattleLog((prev) => [...prev, "Opponent disconnected! Battle ended."]);
+
+      // Clear states to prevent stuck game
+      setIsSimulating(false);
+      setWaitingForOpponent(false);
+      setIsMyTurn(false);
+      setActionQueue([]);
+      setIsProcessingAction(false);
     };
 
-    // Set up all event listeners
     matchmaking.on("battle_created", handleBattleCreated);
-    matchmaking.on("battle_start", handleBattleStart);
-    matchmaking.on("opponent_ready", handleOpponentReadyEvent);
-    matchmaking.on("opponent_action", (action) => {
-      if (!mounted) return;
-      console.log("Received opponent action:", action);
-      handleOpponentAction(action);
-    });
-    matchmaking.on("action_confirmed", (data) => {
-      if (!mounted) return;
-      console.log("Action confirmed by server");
-      handleActionConfirmed(data);
-    });
-    matchmaking.on("opponent_disconnected", () => {
-      if (!mounted) return;
-      console.log("Opponent disconnected");
-      handleOpponentDisconnect();
-    });
+    matchmaking.on("battle_start", handleBattleStartEvent);
+    matchmaking.on("opponent_disconnected", handleOpponentDisconnected);
 
-    // Initialize battle after setting up listeners
     initializeBattle();
 
     return () => {
-      console.log("Battle effect cleanup - removing listeners");
       mounted = false;
-      matchmaking.removeListener("battle_created", handleBattleCreated);
-      matchmaking.removeListener("battle_start", handleBattleStart);
-      matchmaking.removeListener("opponent_ready", handleOpponentReadyEvent);
-      matchmaking.removeListener("opponent_action", handleOpponentAction);
-      matchmaking.removeListener("action_confirmed", handleActionConfirmed);
-      matchmaking.removeListener(
-        "opponent_disconnected",
-        handleOpponentDisconnect
-      );
+      matchmaking.off("battle_created", handleBattleCreated);
+      matchmaking.off("battle_start", handleBattleStartEvent);
+      matchmaking.off("opponent_disconnected", handleOpponentDisconnected);
     };
-  }, [agent1, agent2, apiKey, battleId, isReady, opponentReady]);
+  }, [agent1, agent2, apiKey, battleId, handleBattleStart]);
 
   const startBattle = async () => {
     if (!battleAgent1 || !battleAgent2) {
@@ -983,18 +1064,11 @@ export function BattleArena({
     setBattleLog((prev) => [...prev, "Waiting for opponent..."]);
   };
 
-  // Remove the state monitoring effect since we'll let battle_start handle everything
-  useEffect(() => {
-    if (isSimulating && isMyTurn && !waitingForOpponent) {
-      console.log("Starting turn simulation");
-      simulateTurn();
-    }
-  }, [isSimulating, isMyTurn, waitingForOpponent]);
-
   // Helper function to get health percentage safely
   const getHealthPercentage = (agent: BattleAgent) => {
     const health = agent.getBattleState().currentHealth;
-    return Math.max(0, Math.min(100, health));
+    const maxHealth = agent.getBattleState().maxHealth;
+    return Math.max(0, Math.min(100, (health / maxHealth) * 100));
   };
 
   if (!battleAgent1 || !battleAgent2) {
