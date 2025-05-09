@@ -33,11 +33,11 @@ export class BattleAgent {
     this.battleState = {
       currentHealth: 100,
       maxHealth: 100,
-      currentMana: 50,
-      maxMana: 50,
+      currentMana: 100,
+      maxMana: 100,
       cooldowns: {},
       statusEffects: [],
-      defense: 0,
+      defense: 50,
       accuracy: 100,
     };
   }
@@ -150,7 +150,8 @@ export class BattleAgent {
 
     const move = SPECIAL_MOVES[moveName];
     if (!move) {
-      const damage = Math.floor(5 + this.agent.skills.attack * 0.5);
+      // Increase basic attack damage (was 0.15)
+      const damage = Math.floor(1 + this.agent.skills.attack * 0.25);
       return { success: true, damage };
     }
 
@@ -165,8 +166,9 @@ export class BattleAgent {
     this.battleState.cooldowns[moveName] = move.cooldown || 3;
 
     const effects: StatusEffect[] = [];
+    // Increase special move damage (was 0.025)
     let damage = Math.floor(
-      move.basePower * (1 + this.agent.skills.attack * 0.1)
+      move.basePower * (0.4 + this.agent.skills.attack * 0.05)
     );
 
     // Apply move effects
@@ -175,7 +177,7 @@ export class BattleAgent {
         effects.push({
           name: "Burned",
           duration: 3,
-          effect: { damage: Math.floor(move.basePower * 0.1) },
+          effect: { damage: Math.floor(move.basePower * 0.02) },
         });
       }
       if (move.effect.includes("stun")) {
@@ -191,7 +193,7 @@ export class BattleAgent {
     }
 
     // Apply target's defense
-    damage = Math.floor(damage * (1 - target.getBattleState().defense / 100));
+    damage = Math.floor(damage * (1 - target.getBattleState().defense / 200));
 
     return {
       success: true,

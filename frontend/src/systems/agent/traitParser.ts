@@ -131,23 +131,23 @@ const TRAIT_STAT_WEIGHTS = {
 
 // Base stats for all agents
 const BASE_STATS: Stats = {
-  strength: 15,
-  agility: 15,
-  intelligence: 15,
-  charisma: 15,
-  vitality: 15,
-  magic: 15,
-  stealth: 15,
-  defense: 15,
-  speed: 15,
+  strength: 20,
+  agility: 20,
+  intelligence: 20,
+  charisma: 20,
+  vitality: 20,
+  magic: 20,
+  stealth: 20,
+  defense: 20,
+  speed: 20,
 };
 
 // Base skills for all agents
 const BASE_SKILLS: Skills = {
-  attack: 5,
-  defense: 5,
-  magic: 5,
-  speed: 5,
+  attack: 10,
+  defense: 10,
+  magic: 10,
+  speed: 10,
 };
 
 // Skill specialization thresholds
@@ -341,7 +341,7 @@ function getTraitBasedMoves(traits: Trait): string[] {
   return Array.from(moveSet);
 }
 
-export function createAgent(id: number, traits: Trait) {
+export function createAgent(id: number, traits: Trait, address?: string) {
   const stats = calculateStats(traits);
   const skills = calculateSkills(stats);
 
@@ -373,6 +373,7 @@ export function createAgent(id: number, traits: Trait) {
     specialMoves: availableMoves,
     level: 1,
     experience: 0,
+    address: address || "",
   };
 }
 
