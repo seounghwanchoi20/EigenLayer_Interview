@@ -16,7 +16,7 @@ function App() {
             <div className="container mx-auto px-4">
               <header className="py-6 border-b border-gray-800 mb-8">
                 <div className="flex justify-between items-center">
-                  <h1 className="text-3xl font-bold">Milady Arena</h1>
+                  <h1 className="text-3xl font-bold">Eigen Arena</h1>
                   <ConnectButton />
                 </div>
               </header>

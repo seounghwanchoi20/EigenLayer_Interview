@@ -80,21 +80,8 @@ interface DamageNumberProps {
 }
 
 const DamageNumber = ({ damage, position, onComplete }: DamageNumberProps) => {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 0, x: position === "left" ? -50 : 50 }}
-      animate={{ opacity: 1, y: -50 }}
-      exit={{ opacity: 0 }}
-      onAnimationComplete={onComplete}
-      className="absolute top-1/2 text-2xl font-bold text-red-400"
-      style={{
-        left: position === "left" ? "25%" : "75%",
-        textShadow: "0 0 10px rgba(255, 0, 0, 0.5)",
-      }}
-    >
-      -{damage}
-    </motion.div>
-  );
+  setTimeout(onComplete, 0);
+  return null;
 };
 
 interface StatusEffectAnimationProps {
@@ -430,7 +417,7 @@ const PokemonStyleHealthBar = ({
     >
       <div className="flex items-center gap-2 mb-1">
         <span className="font-pokemon text-black text-sm">{name}</span>
-        <span className="font-pokemon text-black text-sm">Lv.42</span>
+        <span className="font-pokemon text-black text-sm">Lv.1</span>
       </div>
       <div className="bg-black rounded p-1">
         <div className="bg-[#1c1c1c] p-1 rounded-sm">
