@@ -629,7 +629,11 @@ export function BattleArena({
 
       setAttackingAgent(null);
       setHitAgent(null);
-      setIsMyTurn(true);
+
+      // Only set turn if no winner yet
+      if (winner === null) {
+        setIsMyTurn(true);
+      }
     } catch (error) {
       console.error("Error handling opponent action:", error);
     }
@@ -677,8 +681,11 @@ export function BattleArena({
       });
     }
 
-    setWaitingForOpponent(true);
-    setIsMyTurn(false);
+    // Only set waiting and turn if no winner yet
+    if (winner === null) {
+      setWaitingForOpponent(true);
+      setIsMyTurn(false);
+    }
   };
 
   const simulateTurn = async () => {
