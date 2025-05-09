@@ -7,6 +7,7 @@ interface Player {
   agent: any;
   status: "waiting" | "in_battle";
   ws: WebSocket;
+  battleId?: string;
 }
 
 interface Challenge {
@@ -15,9 +16,21 @@ interface Challenge {
   timestamp: number;
 }
 
+interface Battle {
+  id: string;
+  player1: string;
+  player2: string;
+  currentTurn: string;
+  lastAction?: any;
+  readyPlayers: Set<string>; // Track which players are ready
+  player1Health: number;
+  player2Health: number;
+}
+
 class GameServer {
   private players: Map<string, Player> = new Map();
   private challenges: Map<string, Challenge> = new Map();
+  private battles: Map<string, Battle> = new Map();
   private wss: WebSocket.Server;
 
   constructor(port: number) {
@@ -54,7 +67,7 @@ class GameServer {
   }
 
   private handleMessage(playerId: string, ws: WebSocket, data: any) {
-    console.log(`Received message from ${playerId}:`, data.type);
+    console.log(`Received message from ${playerId}:`, data);
 
     switch (data.type) {
       case "join_waiting_room":
@@ -71,6 +84,12 @@ class GameServer {
         break;
       case "decline_challenge":
         this.handleDeclineChallenge(playerId, data);
+        break;
+      case "battle_action":
+        this.handleBattleAction(playerId, data);
+        break;
+      case "battle_ready":
+        this.handleBattleReady(playerId, data.battleId);
         break;
       default:
         console.warn("Unknown message type:", data.type);
@@ -155,12 +174,31 @@ class GameServer {
       return;
     }
 
-    challenger.status = "in_battle";
-    player.status = "in_battle";
+    // Create a new battle with initial health
+    const battleId = randomUUID();
+    const battle: Battle = {
+      id: battleId,
+      player1: challenger.id,
+      player2: player.id,
+      currentTurn: challenger.id,
+      readyPlayers: new Set(),
+      player1Health: 100,
+      player2Health: 100,
+    };
 
+    this.battles.set(battleId, battle);
+
+    // Update player states
+    challenger.status = "in_battle";
+    challenger.battleId = battleId;
+    player.status = "in_battle";
+    player.battleId = battleId;
+
+    // Notify both players about the battle creation
     challenger.ws.send(
       JSON.stringify({
-        type: "battle_start",
+        type: "battle_created",
+        battleId,
         opponent: {
           address: player.address,
           agent: player.agent,
@@ -170,7 +208,8 @@ class GameServer {
 
     player.ws.send(
       JSON.stringify({
-        type: "battle_start",
+        type: "battle_created",
+        battleId,
         opponent: {
           address: challenger.address,
           agent: challenger.agent,
@@ -181,7 +220,7 @@ class GameServer {
     this.challenges.delete(challengeId);
     this.broadcastWaitingRoomUpdate();
 
-    console.log(`Battle started: ${challenger.address} vs ${player.address}`);
+    console.log(`Battle created: ${challenger.address} vs ${player.address}`);
   }
 
   private handleDeclineChallenge(playerId: string, data: any) {
@@ -213,8 +252,289 @@ class GameServer {
     console.log(`Challenge declined: ${challenge.from} → ${challenge.to}`);
   }
 
+  private handleBattleAction(playerId: string, data: any) {
+    console.log(
+      `[Battle Action] Starting battle action for player ${playerId}`
+    );
+    console.log(`[Battle Action] Current action data:`, data);
+
+    const player = this.players.get(playerId);
+    if (!player || !player.battleId) {
+      console.warn("[Battle Action] Player not in battle");
+      return;
+    }
+
+    const battle = this.battles.get(player.battleId);
+    if (!battle) {
+      console.warn("[Battle Action] Battle not found");
+      return;
+    }
+
+    // Log initial health values
+    console.log(`[Battle Action] Initial health values:`, {
+      player1Health: battle.player1Health,
+      player2Health: battle.player2Health,
+    });
+
+    // Calculate new health values
+    const damage = data.action.damage || 0;
+    console.log(`[Battle Action] Processing damage: ${damage}`);
+
+    let myNewHealth, opponentNewHealth;
+    if (player.id === battle.player1) {
+      battle.player2Health = Math.max(0, battle.player2Health - damage);
+      myNewHealth = battle.player1Health;
+      opponentNewHealth = battle.player2Health;
+    } else {
+      battle.player1Health = Math.max(0, battle.player1Health - damage);
+      myNewHealth = battle.player2Health;
+      opponentNewHealth = battle.player1Health;
+    }
+
+    // Log health updates
+    console.log(`[Battle Action] Updated health values:`, {
+      player1Health: battle.player1Health,
+      player2Health: battle.player2Health,
+      myNewHealth,
+      opponentNewHealth,
+    });
+
+    // Update battle state
+    battle.lastAction = data.action;
+    battle.currentTurn =
+      battle.player1 === player.id ? battle.player2 : battle.player1;
+    this.battles.set(battle.id, battle);
+
+    // Get opponent
+    const opponentId =
+      battle.player1 === player.id ? battle.player2 : battle.player1;
+    const opponent = this.players.get(opponentId);
+    if (!opponent) {
+      console.warn("[Battle Action] Opponent not found");
+      return;
+    }
+
+    // Send action to opponent with health updates
+    const opponentMessage = {
+      type: "opponent_action",
+      action: {
+        ...data.action,
+        damage: data.action.damage || 0,
+        effects: data.action.effects || [],
+      },
+      myHealth:
+        player.id === battle.player1
+          ? battle.player2Health
+          : battle.player1Health,
+      opponentHealth:
+        player.id === battle.player1
+          ? battle.player1Health
+          : battle.player2Health,
+      battleId: battle.id,
+    };
+
+    // Debug log for health values
+    console.log(`[Battle Action] Preparing opponent message:`, {
+      playerId,
+      isPlayer1: player.id === battle.player1,
+      healthValues: {
+        player1Health: battle.player1Health,
+        player2Health: battle.player2Health,
+        sentMyHealth: opponentMessage.myHealth,
+        sentOpponentHealth: opponentMessage.opponentHealth,
+      },
+      fullMessage: opponentMessage,
+    });
+
+    // Send confirmation to player with health updates
+    const playerMessage = {
+      type: "action_confirmed",
+      battleId: battle.id,
+      myHealth:
+        player.id === battle.player1
+          ? battle.player1Health
+          : battle.player2Health,
+      opponentHealth:
+        player.id === battle.player1
+          ? battle.player2Health
+          : battle.player1Health,
+    };
+
+    // Ensure messages are properly stringified
+    const opponentMessageString = JSON.stringify(opponentMessage);
+    const playerMessageString = JSON.stringify(playerMessage);
+
+    console.log(`[Battle Action] Sending messages (stringified):`, {
+      opponentMessage: opponentMessageString,
+      playerMessage: playerMessageString,
+    });
+
+    opponent.ws.send(opponentMessageString);
+    player.ws.send(playerMessageString);
+
+    console.log(`Player ${playerId} performed action:`, data.action);
+    console.log(`Damage calculated: ${damage}`);
+    console.log(
+      `Updated health - Player 1: ${battle.player1Health}, Player 2: ${battle.player2Health}`
+    );
+  }
+
+  private handleBattleReady(playerId: string, battleId: string) {
+    console.log(
+      `[Battle] Received battle_ready from player ${playerId} for battle ${battleId}`
+    );
+
+    const player = this.players.get(playerId);
+    if (!player) {
+      console.warn("[Battle] Player not found:", playerId);
+      return;
+    }
+
+    const battle = this.battles.get(battleId);
+    if (!battle) {
+      console.warn("[Battle] Battle not found:", battleId);
+      return;
+    }
+
+    // Debug log before adding player
+    console.log(`[Battle ${battleId}] Current ready players before adding:`, {
+      readyPlayers: Array.from(battle.readyPlayers),
+      readyCount: battle.readyPlayers.size,
+    });
+
+    // Add this player to ready set if not already ready
+    if (!battle.readyPlayers.has(playerId)) {
+      battle.readyPlayers.add(playerId);
+      console.log(`[Battle ${battleId}] Added player ${playerId} to ready set`);
+    } else {
+      console.log(`[Battle ${battleId}] Player ${playerId} was already ready`);
+    }
+
+    // Debug log after adding player
+    console.log(`[Battle ${battleId}] Ready players after adding:`, {
+      readyPlayers: Array.from(battle.readyPlayers),
+      readyCount: battle.readyPlayers.size,
+      player1: battle.player1,
+      player2: battle.player2,
+      player1Ready: battle.readyPlayers.has(battle.player1),
+      player2Ready: battle.readyPlayers.has(battle.player2),
+    });
+
+    // If both players are ready, start the battle immediately
+    if (
+      battle.readyPlayers.has(battle.player1) &&
+      battle.readyPlayers.has(battle.player2)
+    ) {
+      console.log(
+        `[Battle ${battleId}] Both players are ready, starting battle!`
+      );
+      const player1 = this.players.get(battle.player1);
+      const player2 = this.players.get(battle.player2);
+
+      if (!player1 || !player2) {
+        console.error(
+          `[Battle ${battleId}] Cannot start battle - missing players:`,
+          {
+            player1Present: !!player1,
+            player2Present: !!player2,
+          }
+        );
+        return;
+      }
+
+      // Send battle_start to both players
+      const player1Message = {
+        type: "battle_start",
+        opponent: {
+          address: player2.address,
+          agent: player2.agent,
+        },
+        battleId: battleId,
+        isFirstTurn: true,
+        myHealth: battle.player1Health,
+        opponentHealth: battle.player2Health,
+      };
+
+      const player2Message = {
+        type: "battle_start",
+        opponent: {
+          address: player1.address,
+          agent: player1.agent,
+        },
+        battleId: battleId,
+        isFirstTurn: false,
+        myHealth: battle.player2Health,
+        opponentHealth: battle.player1Health,
+      };
+
+      console.log(
+        `[Battle ${battleId}] Sending battle_start messages with health:`,
+        {
+          player1Message,
+          player2Message,
+          currentHealth: {
+            player1: battle.player1Health,
+            player2: battle.player2Health,
+          },
+        }
+      );
+
+      player1.ws.send(JSON.stringify(player1Message));
+      player2.ws.send(JSON.stringify(player2Message));
+
+      // Update battle state
+      battle.currentTurn = battle.player1; // Set first player's turn
+      this.battles.set(battleId, battle);
+    } else {
+      // Notify the other player that this player is ready
+      const opponentId =
+        battle.player1 === playerId ? battle.player2 : battle.player1;
+      const opponent = this.players.get(opponentId);
+
+      if (opponent) {
+        console.log(
+          `[Battle ${battleId}] Notifying opponent ${opponentId} that player ${playerId} is ready`
+        );
+        opponent.ws.send(
+          JSON.stringify({
+            type: "opponent_ready",
+            battleId: battleId,
+          })
+        );
+      } else {
+        console.warn(
+          `[Battle ${battleId}] Cannot notify opponent ${opponentId} - not found`
+        );
+      }
+    }
+  }
+
   private handleDisconnect(playerId: string) {
-    this.handleLeaveWaitingRoom(playerId);
+    const player = this.players.get(playerId);
+    if (!player) return;
+
+    // If player was in battle, notify opponent
+    if (player.battleId) {
+      const battle = this.battles.get(player.battleId);
+      if (battle) {
+        const opponentId =
+          battle.player1 === playerId ? battle.player2 : battle.player1;
+        const opponent = this.players.get(opponentId);
+        if (opponent) {
+          opponent.ws.send(
+            JSON.stringify({
+              type: "opponent_disconnected",
+            })
+          );
+          opponent.status = "waiting";
+          opponent.battleId = undefined;
+        }
+        this.battles.delete(player.battleId);
+      }
+    }
+
+    this.players.delete(playerId);
+    this.broadcastWaitingRoomUpdate();
   }
 
   private broadcastWaitingRoomUpdate() {

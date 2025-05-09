@@ -6,6 +6,7 @@ import type { Player } from "../services/matchmaking";
 import { createAgent } from "../systems/agent/traitParser";
 import { ARENA_FIGHTER_ADDRESS } from "../config/contracts";
 import { BattleArena } from "../components/BattleArena";
+import type { Agent } from "../systems/agent/types";
 
 const abi = [
   {
@@ -66,6 +67,7 @@ export function GameLobby() {
   const [battleState, setBattleState] = useState<{
     opponent: any;
     myAgent: any;
+    battleId: string;
   } | null>(null);
 
   // Get user's NFT balance
@@ -173,19 +175,63 @@ export function GameLobby() {
       setChallengedBy(challenger);
     });
 
-    matchmaking.on("battle_start", (opponent: any) => {
-      console.log("Battle starting with opponent:", opponent);
-      if (!selectedNFT || !traits) {
-        console.error("Missing required data for battle");
+    matchmaking.on("battle_created", (data: any) => {
+      console.log("Battle created with data:", data);
+      if (!selectedNFT || !traits || !address) {
+        console.error("Missing required data for battle", {
+          selectedNFT,
+          traits,
+          address,
+        });
         return;
       }
-      const myAgent = createAgent(selectedNFT, traits);
-      setBattleState({ opponent, myAgent });
-      setIsInWaitingRoom(false);
+
+      // Only transition if we're not already in a battle
+      if (!battleState) {
+        // Create agent with address
+        const myAgent = createAgent(selectedNFT, traits, address);
+        console.log("Created my agent:", myAgent);
+        setBattleState({
+          opponent: data.opponent,
+          myAgent,
+          battleId: data.battleId,
+        });
+        setIsInWaitingRoom(false);
+      }
+    });
+
+    matchmaking.on("battle_start", (data: any) => {
+      console.log("Battle starting with data:", data);
+      if (!selectedNFT || !traits || !address) {
+        console.error("Missing required data for battle", {
+          selectedNFT,
+          traits,
+          address,
+        });
+        return;
+      }
+
+      // Only transition if we're not already in a battle
+      if (!battleState) {
+        // Create agent with address
+        const myAgent = createAgent(selectedNFT, traits, address);
+        console.log("Created my agent:", myAgent);
+        setBattleState({
+          opponent: data.opponent,
+          myAgent,
+          battleId: data.battleId,
+        });
+        setIsInWaitingRoom(false);
+      }
     });
 
     return () => {
-      matchmaking.removeAllListeners();
+      matchmaking.removeListener("connected", () => {});
+      matchmaking.removeListener("disconnected", () => {});
+      matchmaking.removeListener("player_list", () => {});
+      matchmaking.removeListener("challenge_received", () => {});
+      matchmaking.removeListener("battle_created", () => {});
+      matchmaking.removeListener("battle_start", () => {});
       if (isInWaitingRoom) {
         matchmaking.leaveWaitingRoom();
       }
@@ -215,7 +261,7 @@ export function GameLobby() {
       }
 
       console.log("Creating agent with traits:", traits);
-      const agent = createAgent(selectedNFT, traits);
+      const agent = createAgent(selectedNFT, traits, address);
       console.log("Created agent:", agent);
 
       const player: Player = {
@@ -261,11 +307,13 @@ export function GameLobby() {
   };
 
   if (battleState) {
+    console.log("Transitioning to battle with state:", battleState);
     return (
       <BattleArena
         agent1={battleState.myAgent}
         agent2={battleState.opponent.agent}
         apiKey=""
+        battleId={battleState.battleId}
       />
     );
   }

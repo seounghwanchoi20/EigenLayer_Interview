@@ -39,6 +39,7 @@ export interface Agent {
   specialMoves: string[];
   level: number;
   experience: number;
+  address: string;
 }
 
 export type TraitCategory = keyof Trait;
